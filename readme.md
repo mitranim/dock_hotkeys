@@ -6,10 +6,11 @@ The code was mostly written via Anthropic's Claude Code.
 
 ## Features
 
-* Press Control+backtick to activate app 1 in your Dock.
-* Press Control+1-0 to activate the other apps in your Dock (from 2 to 11).
+* Press Control+backtick to activate app 0 in your Dock (Finder).
+* Press Control+1-0 to activate the other apps in your Dock (from 1 to 10).
 * Minimal and lightweight.
 * No external dependencies.
+* No AppleScript.
 * CLI only.
 
 ## Requirements
@@ -71,14 +72,22 @@ If the app is running but does not appear to work after granting all permissions
 
 Once `dock_hotkeys` is running and you've granted it accessibility permissions:
 
-* Press Control+backtick to activate the first app in your Dock.
+* Press Control+backtick to activate the first app in your Dock (Finder).
 * Press Control+1, Control+2 and so on until 0, to activate the other apps in your Dock.
 
 If launched in the foreground from a terminal, the app will keep running until you quit it with Control+C.
 
 ## How it works
 
-`dock_hotkeys` uses the `CGEventTap` API to monitor keyboard events and detect matching key combinations. When detected, it uses AppleScript to simulate clicking on the corresponding app icon in the Dock.
+* Uses the `CGEventTap` API to monitor keyboard events and detect matching key combinations.
+* When a match is detected, uses `NSWorkspace.shared.openApplication` to idempotently open/focus an app.
+* Gets Dock app positions from Dock preferences accessed via `CFPreferencesCopyMultiple`.
+* Detects changes by watching `~/Library/Preferences/com.apple.dock.plist`.
+  * It would be ideal to use an in-memory notification API without having to watch files, but was unable to find a working API that would actually notify us about changes in app positions.
+
+## TODO
+
+Consider using the `RegisterEventHotKey` API to register specific hotkeys. In the `CGEventTap` API, the OS calls our callback for every keystroke. In `RegisterEventHotKey`, it might not.
 
 ## License
 

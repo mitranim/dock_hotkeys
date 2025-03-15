@@ -17,20 +17,20 @@ class HotKeyManager {
   private let verbose: Bool
 
   let hotkeyMappings: [Hotkey: Int] = [
-    // Control+backtick (key code 50) for position 1.
-    Hotkey(keyCode: 50, modifiers: .maskControl): 1,
+    // Control+backtick (key code 50) for position 0 (always Finder).
+    Hotkey(keyCode: 50, modifiers: .maskControl): 0,
 
     // Control+1 through Control+0 for the rest.
-    Hotkey(keyCode: 18, modifiers: .maskControl): 2,  // Control+1 -> position 2
-    Hotkey(keyCode: 19, modifiers: .maskControl): 3,  // Control+2 -> position 3
-    Hotkey(keyCode: 20, modifiers: .maskControl): 4,  // Control+3 -> position 4
-    Hotkey(keyCode: 21, modifiers: .maskControl): 5,  // Control+4 -> position 5
-    Hotkey(keyCode: 23, modifiers: .maskControl): 6,  // Control+5 -> position 6
-    Hotkey(keyCode: 22, modifiers: .maskControl): 7,  // Control+6 -> position 7
-    Hotkey(keyCode: 26, modifiers: .maskControl): 8,  // Control+7 -> position 8
-    Hotkey(keyCode: 28, modifiers: .maskControl): 9,  // Control+8 -> position 9
-    Hotkey(keyCode: 25, modifiers: .maskControl): 10, // Control+9 -> position 10
-    Hotkey(keyCode: 29, modifiers: .maskControl): 11, // Control+0 -> position 11
+    Hotkey(keyCode: 18, modifiers: .maskControl): 1,  // Control+1 -> position 1
+    Hotkey(keyCode: 19, modifiers: .maskControl): 2,  // Control+2 -> position 2
+    Hotkey(keyCode: 20, modifiers: .maskControl): 3,  // Control+3 -> position 3
+    Hotkey(keyCode: 21, modifiers: .maskControl): 4,  // Control+4 -> position 4
+    Hotkey(keyCode: 23, modifiers: .maskControl): 5,  // Control+5 -> position 5
+    Hotkey(keyCode: 22, modifiers: .maskControl): 6,  // Control+6 -> position 6
+    Hotkey(keyCode: 26, modifiers: .maskControl): 7,  // Control+7 -> position 7
+    Hotkey(keyCode: 28, modifiers: .maskControl): 8,  // Control+8 -> position 8
+    Hotkey(keyCode: 25, modifiers: .maskControl): 9,  // Control+9 -> position 9
+    Hotkey(keyCode: 29, modifiers: .maskControl): 10, // Control+0 -> position 10
   ]
 
   private var eventTap: CFMachPort?
@@ -43,11 +43,20 @@ class HotKeyManager {
   // Observers for app activation
   private var workspaceObserver: NSObjectProtocol?
 
-  // Cache of compiled AppleScripts for each Dock position
-  private var compiledScripts: [Int: NSAppleScript] = [:]
+  // File system watcher for Dock plist changes
+  private var dockPlistSource: DispatchSourceFileSystemObject?
+
+  // Path to the Dock plist file and its parent directory
+  private static let prefsDirectoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Preferences")
+  private static let dockPlistURL = prefsDirectoryURL.appendingPathComponent("com.apple.dock.plist")
+  private var lastDockPlistModified: Date = Date(timeIntervalSince1970: 0)
+
+  // Mapping of Dock positions to app URLs
+  private var dockAppURLs: [Int: URL] = [:]
 
   init(verbose: Bool = false) {
     self.verbose = verbose
+    self.dockAppURLs = loadDockAppURLs()
   }
 
   deinit {
@@ -55,6 +64,7 @@ class HotKeyManager {
     if let observer = workspaceObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
     }
+    stopWatchingDockPlist()
   }
 
   // Logging method that respects verbose setting
@@ -138,32 +148,34 @@ class HotKeyManager {
     }
   }
 
-  private func compileScriptForPosition(_ position: Int) -> NSAppleScript? {
-    let script = """
-    tell application "System Events"
-      -- Get dock app name.
-      tell process "Dock"
-        set dockAppName to name of UI element \(position) of list 1
-      end tell
+  private func loadDockAppURLs() -> [Int: URL] {
+    let keys = ["persistent-apps"] as CFArray
+    let dockPrefs = CFPreferencesCopyMultiple(keys, "com.apple.dock" as CFString, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
 
-      -- Get frontmost app display name instead of process name.
-      set frontProcess to first process whose frontmost is true
-      set frontAppName to displayed name of frontProcess
+    guard let preferences = dockPrefs as? [String: Any],
+          let persistentApps = preferences["persistent-apps"] as? [[String: Any]] else {
+      print("Error loading Dock preferences")
+      return [:]
+    }
 
-      if dockAppName is equal to frontAppName then
-        return "App at position \(position) is already active, ignoring hotkey"
-      end if
+    var appURLs: [Int: URL] = [:]
 
-      -- Activate the app.
-      tell process "Dock"
-        set frontmost to true
-        click UI element \(position) of list 1
-      end tell
-      return "Activated dock app: " & dockAppName
-    end tell
-    """
+    // Add Finder at position 0 (it's always the first item in the Dock)
+    if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Finder") {
+      appURLs[0] = finderURL
+    }
 
-    return NSAppleScript(source: script)
+    // Map persistent apps, adding 1 to index to account for Finder being at position 0
+    for (index, app) in persistentApps.enumerated() {
+      if let tileData = app["tile-data"] as? [String: Any],
+         let bundleIdentifier = tileData["bundle-identifier"] as? String,
+         let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+        // Add 1 to index: position 0 is Finder, persistent apps start at position 1
+        appURLs[index + 1] = appURL
+      }
+    }
+
+    return appURLs
   }
 
   private func registerWithEventTap() -> Bool {
@@ -182,10 +194,11 @@ class HotKeyManager {
           let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
           let hotkey = Hotkey(keyCode: Int(keyCode), modifiers: modifiers)
 
-          if let position = manager.hotkeyMappings[hotkey] {
+          if let position = manager.hotkeyMappings[hotkey],
+             let appURL = manager.dockAppURLs[position] {
             // Dispatch to main thread to avoid blocking event tap
             DispatchQueue.main.async {
-              manager.activateDockApp(at: position)
+              manager.activateDockApp(appURL: appURL)
             }
 
             // Consume the event
@@ -207,7 +220,7 @@ class HotKeyManager {
     self.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-
+    startWatchingDockPlist()
     return true
   }
 
@@ -226,36 +239,87 @@ class HotKeyManager {
       runLoopSource = nil
     }
 
-    // Clear the script cache
-    compiledScripts.removeAll()
+    // Stop file watching if active
+    stopWatchingDockPlist()
 
     // Reset registered flag to allow re-registration
     hotkeysRegistered = false
   }
 
-  private func activateDockApp(at position: Int) {
-    log("Activating Dock item at position \(position)")
+  private func activateDockApp(appURL: URL) {
+    log("Activating app at \(appURL.path)")
 
-    var error: NSDictionary?
-    let scriptObject: NSAppleScript
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
 
-    // Get cached script or compile a new one
-    if let compiledScript = compiledScripts[position] {
-      scriptObject = compiledScript
-    } else if let newScript = compileScriptForPosition(position) {
-      scriptObject = newScript
-      // Cache the script for future use
-      compiledScripts[position] = scriptObject
-    } else {
+    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
+      if let error = error {
+        print("Error opening application: \(error)")
+      }
+    }
+  }
+
+  private func startWatchingDockPlist() {
+    stopWatchingDockPlist()
+
+    let directoryPath = HotKeyManager.prefsDirectoryURL.path
+
+    // Open a file descriptor for the preferences directory We have to watch the
+    // directory instead of the file itself, because for this file, we don't
+    // reliably get notifications about changes.
+    let fileDescriptor = open(directoryPath, O_EVTONLY)
+    if fileDescriptor < 0 {
+      print("Error: Unable to open preferences directory for monitoring")
       return
     }
 
-    // Execute the script
-    let result = scriptObject.executeAndReturnError(&error)
-    if let error = error {
-      log("AppleScript error: \(error)")
-    } else if let resultString = result.stringValue {
-      log(resultString)
+    log("Watching \(directoryPath) for changes")
+
+    // Store initial modification date
+    _ = checkAndUpdateDockPlist()
+
+    // Create a dispatch source to monitor the directory
+    let source = DispatchSource.makeFileSystemObjectSource(
+      fileDescriptor: fileDescriptor,
+      eventMask: .write,
+      queue: DispatchQueue.main
+    )
+
+    // Set the event handler
+    source.setEventHandler { [weak self] in
+      guard let self = self else { return }
+
+      // Check if Dock plist has been modified
+      if let hasChanged = self.checkAndUpdateDockPlist(), hasChanged {
+        self.log("Dock preferences changed, updating app URLs")
+        self.dockAppURLs = self.loadDockAppURLs()
+      }
+    }
+
+    // Set cancellation handler to close the file descriptor
+    source.setCancelHandler {
+      close(fileDescriptor)
+    }
+
+    // Store the source and start monitoring
+    dockPlistSource = source
+    source.resume()
+  }
+
+  private func checkAndUpdateDockPlist() -> Bool? {
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: HotKeyManager.dockPlistURL.path),
+          let modDate = attributes[.modificationDate] as? Date else {
+      return nil
+    }
+    let hasChanged = modDate > lastDockPlistModified
+    lastDockPlistModified = modDate
+    return hasChanged
+  }
+
+  private func stopWatchingDockPlist() {
+    if let source = dockPlistSource {
+      source.cancel()
+      dockPlistSource = nil
     }
   }
 

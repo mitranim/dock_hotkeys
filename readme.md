@@ -2,7 +2,7 @@
 
 A CLI MacOS utility that provides global hotkeys to activate apps in the Dock by their ordinal positions.
 
-The code was mostly written via Anthropic's Claude Code.
+The code was mostly written via Anthropic's Claude Code. Many key suggestions came from other bots.
 
 ## Features
 
@@ -70,7 +70,7 @@ If the app is running but does not appear to work after granting all permissions
 
 ## Usage
 
-Once `dock_hotkeys` is running and you've granted it accessibility permissions:
+Once `dock_hotkeys` is running and you've granted it accessibility permissions (and waited a few seconds for the change to be detected):
 
 * Press Control+backtick to activate the first app in your Dock (Finder).
 * Press Control+1, Control+2 and so on until 0, to activate the other apps in your Dock.

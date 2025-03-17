@@ -60,3 +60,68 @@ Instead of watching the plist file (which is unreliable, we don't get notified),
 ---
 
 `hasDockPlistChanged` and `updateDockPlistModificationDate` are invoked one after another, and both access the FS attributes of the file, resulting in a redundant FS operation. Deduplicate into one FS operation. Be concise but correct.
+
+---
+
+We currently get Dock bundle ids via `CFPreferencesCopyMultiple` and detect changes via FS watching. We're changing that.
+
+Carefully consider the following code, which does work:
+
+```swift
+import Foundation
+
+let dockUserDefaults = UserDefaults(suiteName: "com.apple.dock")!
+let dockPrefKey = "persistent-apps"
+
+func printDockAppBundleIds() {
+  if
+    let val = dockUserDefaults.array(forKey: dockPrefKey),
+    !val.isEmpty
+  {
+    for val in val {
+      if
+        let val = val as? [String: Any],
+        let val = val["tile-data"] as? [String: Any],
+        let val = val["bundle-identifier"] as? String
+      {
+        print(val)
+      }
+    }
+  }
+}
+
+class PrefObs: NSObject {
+  override init() {
+    super.init()
+    dockUserDefaults.addObserver(self, forKeyPath: dockPrefKey, context: nil)
+  }
+
+  deinit {
+    dockUserDefaults.removeObserver(self, forKeyPath: dockPrefKey, context: nil)
+  }
+
+  override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+    guard keyPath == dockPrefKey else {
+      super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+      return
+    }
+    printDockAppBundleIds()
+  }
+}
+
+let observer = PrefObs()
+RunLoop.current.run()
+```
+
+Make key changes:
+- Replace `CFPreferencesCopyMultiple` with then new approach.
+- Replace FS watching with the new approach.
+
+Make less-important changes:
+- Move static singletons to module root where possible.
+
+Be terse but correct.
+
+---
+
+The result does work. Next change: move all fields/variables to module root, which can be moved to module root, while staying concurrency-safe.

@@ -6,7 +6,7 @@ The code was mostly written via Anthropic's Claude Code. Many key suggestions ca
 
 ## Features
 
-* Press Control+backtick to activate app 0 in your Dock (Finder).
+* Press Control+Command+backtick to activate app 0 in your Dock (Finder).
 * Press Control+1-0 to activate the other apps in your Dock (from 1 to 10).
 * Minimal and lightweight.
 * No external dependencies.
@@ -72,7 +72,7 @@ If the app is running but does not appear to work after granting all permissions
 
 Once `dock_hotkeys` is running and you've granted it accessibility permissions (and waited a few seconds for the change to be detected):
 
-* Press Control+backtick to activate the first app in your Dock (Finder).
+* Press Control+Command+backtick to activate the first app in your Dock (Finder).
 * Press Control+1, Control+2 and so on until 0, to activate the other apps in your Dock.
 
 If launched in the foreground from a terminal, the app will keep running until you quit it with Control+C.
@@ -88,6 +88,10 @@ If launched in the foreground from a terminal, the app will keep running until y
 ## TODO
 
 Consider using the `RegisterEventHotKey` API to register specific hotkeys. In the `CGEventTap` API, the OS calls our callback for every keystroke. In `RegisterEventHotKey`, it might not.
+
+Consider another set of ordinal hotkeys (for example Command+Control+N) for switching between windows/instances of the current app. For example, if you have 3 browser windows open, Command+Control+1 for the first, 2 for the second, and so on.
+
+When an app was launched (by the user) by invoking `"/Applications/<name>/Contents/MacOS/<name>"`, `dock_hotkeys` seems to create a redundant instance of it upon key press, as if it has a different app URL.
 
 ## License
 

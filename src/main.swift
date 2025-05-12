@@ -8,8 +8,8 @@ let dockPrefKey = "persistent-apps"
 
 // Default hotkey mappings
 let hotkeyMappings: [Hotkey: Int] = [
-  // Control+backtick (key code 50) for position 0 (always Finder).
-  Hotkey(keyCode: 50, modifiers: .maskControl): 0,
+  // Control+Command+backtick (key code 50) for position 0 (always Finder).
+  Hotkey(keyCode: 50, modifiers: [.maskControl, .maskCommand]): 0,
 
   // Control+1 through Control+0 for the rest.
   Hotkey(keyCode: 18, modifiers: .maskControl): 1,  // Control+1 -> position 1

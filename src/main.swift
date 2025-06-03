@@ -69,6 +69,7 @@ class HotKeyManager {
 
   // Observers for app activation
   private var workspaceObserver: NSObjectProtocol?
+  private var distributedObserver: NSObjectProtocol?
 
   // Observer for UserDefaults changes
   private var prefObserver: PrefObs?
@@ -85,6 +86,9 @@ class HotKeyManager {
     unregisterHotkeys()
     if let observer = workspaceObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
+    }
+    if let observer = distributedObserver {
+      DistributedNotificationCenter.default().removeObserver(observer)
     }
     stopWatchingDockPlist()
   }
@@ -117,7 +121,7 @@ class HotKeyManager {
       let distributedCenter = DistributedNotificationCenter.default()
 
       // Add multiple observers to catch different possible notifications.
-      distributedCenter.addObserver(
+      distributedObserver = distributedCenter.addObserver(
         forName: NSNotification.Name("com.apple.accessibility.api"),
         object: nil,
         queue: .main
@@ -159,6 +163,9 @@ class HotKeyManager {
     if hotkeysRegistered {
       return
     }
+
+    // Ensure we're starting clean
+    unregisterHotkeys()
 
     // Check accessibility permissions first.
     let currentPermissions = AXIsProcessTrusted()
@@ -237,7 +244,7 @@ class HotKeyManager {
         }
 
         // Pass through all other events.
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
       },
       userInfo: Unmanaged.passUnretained(self).toOpaque()
     ) else {
@@ -255,7 +262,9 @@ class HotKeyManager {
   }
 
   func unregisterHotkeys() {
-    log("Unregistering previous hotkeys...")
+    if hotkeysRegistered {
+      log("Unregistering previous hotkeys...")
+    }
 
     // Clean up event tap
     if let tap = eventTap {
@@ -267,6 +276,12 @@ class HotKeyManager {
     if let source = runLoopSource {
       CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
       runLoopSource = nil
+    }
+
+    // Clean up observers
+    if let observer = distributedObserver {
+      DistributedNotificationCenter.default().removeObserver(observer)
+      distributedObserver = nil
     }
 
     // Stop file watching if active
